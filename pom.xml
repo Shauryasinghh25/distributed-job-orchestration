@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+        WHY spring-boot-starter-parent as parent?
+        ============================================
+        This gives us:
+          1. Dependency version management for 300+ libraries (no need to specify versions).
+          2. Sensible plugin defaults (compiler target, resource filtering).
+          3. The spring-boot-maven-plugin configuration via pluginManagement.
+
+        We inherit these defaults in our parent POM so ALL child modules
+        automatically get the same managed versions.
+
+        ALTERNATIVE: Use spring-boot-dependencies as a <dependencyManagement> import.
+        TRADEOFF: That approach gives more flexibility but requires manually adding
+        the spring-boot-maven-plugin to each child. For our use case, parent inheritance
+        is simpler and conventional.
+    -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.3.4</version>
+        <relativePath/> <!-- lookup from Maven Central, not local filesystem -->
+    </parent>
+
+    <groupId>com.joborch</groupId>
+    <artifactId>distributed-job-orchestration</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+
+    <!--
+        WHY packaging=pom?
+        ====================
+        Parent POMs produce no artifact (no JAR, no WAR).
+        They are pure build descriptors. Setting packaging=pom tells Maven:
+        "This module only participates in the build lifecycle as a build coordinator."
+    -->
+    <packaging>pom</packaging>
+
+    <name>Distributed Job Orchestration Platform</name>
+    <description>Production-grade distributed job orchestration with RabbitMQ, PostgreSQL, and DAG workflow engine</description>
+
+    <!--
+        WHY declare modules here?
+        ==========================
+        This tells Maven's reactor which directories to include in the build.
+        Maven builds them in DEPENDENCY ORDER (resolved from the module POMs),
+        NOT in the order listed here. So even if we list worker before common,
+        Maven will build common first because worker depends on common.
+    -->
+    <modules>
+        <module>common</module>
+        <module>producer</module>
+        <module>worker</module>
+    </modules>
+
+    <properties>
+        <java.version>21</java.version>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- Pin versions here; children inherit without specifying version -->
+        <testcontainers.version>1.20.1</testcontainers.version>
+    </properties>
+
+    <!--
+        dependencyManagement vs dependencies
+        ======================================
+        dependencyManagement: "If a child uses this artifact, use THIS version."
+                               → Does NOT add the dependency automatically.
+        dependencies:         "Every child module gets this dependency."
+                               → Adds it automatically to all children.
+
+        We ONLY add to <dependencies> what every single module needs.
+        Everything else goes into <dependencyManagement>.
+    -->
+    <dependencyManagement>
+        <dependencies>
+            <!-- Testcontainers BOM — imports all testcontainers module versions -->
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>testcontainers-bom</artifactId>
+                <version>${testcontainers.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <!--
+        These dependencies go to ALL child modules.
+        Lombok and common test utilities are universal enough.
+    -->
+    <dependencies>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional> <!-- not propagated to consumers of our JAR -->
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <!--
+                    WHY explicitly configure the compiler plugin?
+                    We're using Java 21 features (Records, Sealed Classes in later phases).
+                    Spring Boot's parent already sets java.version but being explicit here
+                    avoids any IDE or CI confusion.
+                -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <configuration>
+                        <source>${java.version}</source>
+                        <target>${java.version}</target>
+                        <annotationProcessorPaths>
+                            <path>
+                                <groupId>org.projectlombok</groupId>
+                                <artifactId>lombok</artifactId>
+                            </path>
+                        </annotationProcessorPaths>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
+
+</project>
