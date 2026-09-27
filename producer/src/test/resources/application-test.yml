@@ -1,0 +1,17 @@
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop   # create schema fresh for each test run
+    show-sql: false
+
+logging:
+  level:
+    root: WARN
+    com.joborch: INFO
+    org.testcontainers: INFO
+
+joborch:
+  outbox:
+    poll-interval-ms: 500
+  scheduling:
+    poll-interval-ms: 5000
