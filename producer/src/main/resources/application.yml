@@ -1,0 +1,68 @@
+spring:
+  application:
+    name: job-orchestration-producer
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/joborch_db
+    username: joborch_user
+    password: joborch_pass
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        default_batch_fetch_size: 20
+
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+    virtual-host: /
+    template:
+      mandatory: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+logging:
+  level:
+    root: INFO
+    com.joborch: DEBUG
+    org.springframework.amqp: INFO
+
+joborch:
+  rabbitmq:
+    exchange:
+      jobs: jobs.exchange
+    queue:
+      jobs: jobs.queue
+    retry:
+      ttl-ms: 5000
+  outbox:
+    poll-interval-ms: 1000
+  scheduling:
+    poll-interval-ms: 5000
+
+---
+spring:
+  config:
+    activate:
+      on-profile: docker
+  datasource:
+    url: jdbc:postgresql://postgres:5432/joborch_db
+  rabbitmq:
+    host: rabbitmq
