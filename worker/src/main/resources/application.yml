@@ -1,0 +1,66 @@
+spring:
+  application:
+    name: job-orchestration-worker
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/joborch_db
+    username: joborch_user
+    password: joborch_pass
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+    virtual-host: /
+
+  # Phase 17: Graceful shutdown
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
+server:
+  port: 8081
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+logging:
+  level:
+    root: INFO
+    com.joborch: DEBUG
+    org.springframework.amqp: INFO
+
+joborch:
+  rabbitmq:
+    queue:
+      jobs: jobs.queue
+    exchange:
+      jobs: jobs.exchange
+  worker:
+    retry:
+      delays-ms: "5000,30000,120000"
+    shutdown:
+      timeout-ms: 30000
+
+---
+spring:
+  config:
+    activate:
+      on-profile: docker
+  datasource:
+    url: jdbc:postgresql://postgres:5432/joborch_db
+  rabbitmq:
+    host: rabbitmq
