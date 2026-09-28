@@ -1,0 +1,157 @@
+version: '3.8'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NETWORKS
+# ─────────────────────────────────────────────────────────────────────────────
+# Services communicate using Docker's internal DNS (service name = hostname).
+# 'bridge' is the standard single-host network driver.
+# Services on this network can reach each other; external access requires ports.
+# ─────────────────────────────────────────────────────────────────────────────
+networks:
+  joborch-net:
+    driver: bridge
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VOLUMES — Named volumes persist data across container restarts
+# Without named volumes, 'docker compose down' destroys all DB data.
+# ─────────────────────────────────────────────────────────────────────────────
+volumes:
+  postgres-data:
+  rabbitmq-data:
+
+services:
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # POSTGRESQL 16
+  #
+  # WHY PostgreSQL over MySQL (reference project uses MySQL)?
+  #   1. Native JSONB support — later phases store job payloads as JSON.
+  #   2. Advisory locks — Phase 4 idempotency uses pg_try_advisory_lock().
+  #   3. Better support for complex queries we'll write in Phase 11 (DAG).
+  #   4. Industry standard for new Java/Spring projects in 2024.
+  # ───────────────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: joborch-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: joborch_db
+      POSTGRES_USER: joborch_user
+      POSTGRES_PASSWORD: joborch_pass
+    ports:
+      - "5433:5432" # Expose for DBeaver / IntelliJ database tool
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - joborch-net
+    healthcheck:
+      # pg_isready checks if PostgreSQL is ready to accept connections.
+      # More reliable than checking if the process is running — the process
+      # can be running but the DB not yet initialized.
+      test: ["CMD-SHELL", "pg_isready -U joborch_user -d joborch_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # RABBITMQ 3.13 with Management Plugin
+  #
+  # The "-management" image tag includes the management UI at port 15672.
+  # This is CRITICAL for development — you can inspect queues, messages,
+  # bindings, and consumer counts in real time.
+  #
+  # WHY rabbitmq:3.13-management?
+  #   3.13 supports quorum queues (more reliable than classic mirrored queues)
+  #   and priority queues with improved fairness (needed in Phase 5).
+  # ───────────────────────────────────────────────────────────────────────────
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: joborch-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_DEFAULT_VHOST: /
+    ports:
+      - "5672:5672"    # AMQP protocol — Spring Boot connects here
+      - "15672:15672"  # Management UI — open http://localhost:15672
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - joborch-net
+    healthcheck:
+      # check_port_connectivity verifies AMQP port is accepting connections,
+      # not just that the process started.
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # PRODUCER SERVICE
+  #
+  # depends_on with condition: service_healthy ensures Docker waits for
+  # PostgreSQL AND RabbitMQ health checks to pass before starting the producer.
+  # Without this, producer starts, tries to connect, gets "Connection refused",
+  # and crashes — leading to confusing error messages.
+  # ───────────────────────────────────────────────────────────────────────────
+  producer:
+    build:
+      context: .
+      dockerfile: producer/Dockerfile
+    container_name: joborch-producer
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/joborch_db
+      SPRING_DATASOURCE_USERNAME: joborch_user
+      SPRING_DATASOURCE_PASSWORD: joborch_pass
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: guest
+      SPRING_RABBITMQ_PASSWORD: guest
+      SPRING_PROFILES_ACTIVE: docker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - joborch-net
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # WORKER SERVICE
+  #
+  # WHY no port mapping for the worker?
+  # Workers are internal consumers — they pull from RabbitMQ.
+  # They don't expose HTTP endpoints to the outside world in Phase 1.
+  # Phase 9 (graceful shutdown) will add a management endpoint.
+  #
+  # Scaling: docker compose up --scale worker=3
+  # Each replica is an independent RabbitMQ consumer.
+  # RabbitMQ distributes messages round-robin by default.
+  # ───────────────────────────────────────────────────────────────────────────
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    restart: unless-stopped
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/joborch_db
+      SPRING_DATASOURCE_USERNAME: joborch_user
+      SPRING_DATASOURCE_PASSWORD: joborch_pass
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: guest
+      SPRING_RABBITMQ_PASSWORD: guest
+      SPRING_PROFILES_ACTIVE: docker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - joborch-net
